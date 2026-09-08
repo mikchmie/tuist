@@ -18,7 +18,7 @@ All three changes target code confirmed dead-simple and zero-risk by two indepen
 - `passedValue(for:arguments:)` exists exactly once, as a `public` function in `TuistSupport`; the three call sites that used it (in `XcodeBuildTestCommandService`, `XcodeBuildBuildCommandService`, `XcodeBuildArgumentParser`) are unchanged at the call-site syntax level and behave identically.
 - `ShardMatrixOutputServicing` gains a default `outputEmpty()` operation; `TestService.outputEmptyShardMatrixIfNeeded` calls it instead of hand-building the placeholder.
 - All pre-existing tests pass unchanged (the four `TestServiceTests` empty-shard-matrix assertions in particular, since they exercise behavior, not construction site). One new test is added directly covering `outputEmpty()` against the concrete `ShardMatrixOutputService`.
-- Verified via: `xcodebuild build`/`test` (targeted suites per phase below), `mise run lint`, and a local CLI smoke test of `tuist test` / `tuist xcodebuild test` / `tuist xcodebuild build`.
+- Verified via: `xcodebuild build`/`test` (targeted suites per phase below), `mise run lint`, and a local CLI smoke test of `tuist test` / `tuist xcodebuild test` / `tuist xcodebuild build` for phases 1-2 (phase 3 is automated-only — see its Manual Verification note).
 
 ### Key Discoveries:
 
@@ -81,11 +81,13 @@ Replace the three remaining live copies of `passedValue(for:arguments:)` — in 
 
 #### 1. New shared utility
 
-**File**: `cli/Sources/TuistSupport/Xcode/XcodeBuildArguments.swift` (new file)
+**File**: `cli/Sources/TuistSupport/Utils/XcodeBuildArguments.swift` (new file)
 
 **Intent**: Give the three call sites one canonical implementation of "find the value following an xcodebuild-style `-flag value` argument," instead of three independently maintained copies.
 
-**Contract**: `public func passedValue(for option: String, arguments: [String]) -> String?`, declared at module scope (not nested in a type), body identical to the four existing copies (`firstIndex(of:)` → `index(after:)` → bounds check → subscript). Placed in `TuistSupport/Xcode/` alongside the module's other Xcode-specific utilities (`XcodeController.swift`, `SDKDeploymentTargetsProvider.swift`).
+**Contract**: `public func passedValue(for option: String, arguments: [String]) -> String?`, declared at module scope (not nested in a type), body identical to the four existing copies (`firstIndex(of:)` → `index(after:)` → bounds check → subscript). Placed in `TuistSupport/Utils/`, where the module's other module-scope free functions already live (`Utils/Functions.swift`, `Utils/GraphAlgorithms.swift`) — `TuistSupport/Xcode/` holds only types (`Xcode.swift`, `XcodeController.swift`, `SDKDeploymentTargetsProvider.swift`).
+
+**Known cost of module scope**: a `public` free function named `passedValue` is visible in every file that imports `TuistSupport`, which is nearly the whole CLI. This is accepted deliberately — it is what makes the ~20 existing call sites need zero edits (see the "Shared `passedValue` shape" decision in `plan-brief.md`). The alternative, a `[String]` extension (`arguments.passedValue(for: "-scheme")`), scopes the name properly but requires editing every call site; revisit it only if the global name proves to collide or confuse.
 
 #### 2. XcodeBuildTestCommandService.swift — drop local copy
 
@@ -111,13 +113,22 @@ Replace the three remaining live copies of `passedValue(for:arguments:)` — in 
 
 **Contract**: Delete the `private func passedValue(for:arguments:)` declaration (lines 48-56). Call sites unchanged, same resolution mechanism.
 
+#### 5. Direct unit test for the new shared utility
+
+**File**: `cli/Tests/TuistSupportTests/Utils/XcodeBuildArgumentsTests.swift` (new file)
+
+**Intent**: The three consumer suites exercise `passedValue` only incidentally, through `-scheme`/`-testProductsPath` passthrough paths, and none of them covers either nil branch. A new `public` API in a module the whole CLI imports should have its own contract test.
+
+**Contract**: Three cases, mirroring the style of the sibling tests in `cli/Tests/TuistSupportTests/Utils/`: (a) the option is present and followed by a value → that value is returned; (b) the option is absent → `nil`; (c) the option is the last element of `arguments` → `nil` (the `arguments.endIndex > valueIndex` bounds branch).
+
 ### Success Criteria:
 
 #### Automated Verification:
 
 - Build succeeds: `xcodebuild build -workspace Tuist.xcworkspace -scheme tuist CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""`
 - Lint passes: `mise run lint`
-- Targeted unit tests pass: `xcodebuild test -workspace Tuist.xcworkspace -scheme Tuist-Workspace -only-testing TuistKitTests/XcodeBuildTestCommandServiceTests -only-testing TuistKitTests/XcodeBuildBuildCommandServiceTests -only-testing TuistAutomationTests/XcodeBuildArgumentParserTests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""`
+- Targeted unit tests pass: `xcodebuild test -workspace Tuist.xcworkspace -scheme Tuist-Workspace -only-testing TuistKitTests/XcodeBuildTestCommandServiceTests -only-testing TuistKitTests/XcodeBuildBuildCommandServiceTests -only-testing TuistAutomationTests/XcodeBuildArgumentParserTests -only-testing TuistSupportTests/XcodeBuildArgumentsTests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""`
+- New direct coverage: the three `XcodeBuildArgumentsTests` cases (value present, option absent, option trailing) pass
 - Exactly one implementation left: `grep -rln "func passedValue" cli/Sources` returns only the new `TuistSupport` file; `grep -rn "private func passedValue" cli/Sources` returns no matches
 
 #### Manual Verification:
@@ -131,6 +142,8 @@ Replace the three remaining live copies of `passedValue(for:arguments:)` — in 
 ### Overview
 
 Stop `TestService.swift` from constructing the generated `Components.Schemas.ShardPlan` type directly. Add a default-implemented method to `ShardMatrixOutputServicing` that builds the empty placeholder internally and routes through the protocol's existing `output(_:)` requirement, so the four existing tests that verify `output(...)` was called with an empty shape keep passing unmodified.
+
+**What this does and does not buy.** The benefit is layering and locality: the one place that hand-builds a `ShardPlan` moves next to the only code that owns and consumes that type, and the `tuist test` orchestrator stops naming generated types at all. It is *not* a reduction in schema-churn maintenance — the same five-field literal still needs editing whenever the server schema gains a required field; only the file that gets edited changes. The PR description should say it this way rather than claiming reduced patch frequency.
 
 ### Changes Required:
 
@@ -187,7 +200,7 @@ This is a protocol extension with a concrete body, not a new `@Mockable` require
 
 #### Manual Verification:
 
-- Build the `tuist` CLI and run `tuist test --shard-total 2` (or equivalent sharding flags) against a local sample project; confirm the run completes and the shard matrix output is produced correctly, including the empty-matrix early-return path if reachable (e.g. a scheme with no tests to run)
+- None. The changed line is only reachable through `finishSkippedTests` (`TestService.swift:1455`) — the "no tests to run" path — and sharding additionally requires `--build-only` (`TestService.swift:264-266` throws `TestServiceError.shardPlanningRequiresBuildOnly` otherwise), so a hand-run smoke test would need a purpose-built fixture to reach the code at all. Coverage instead comes from the four existing `TestServiceTests` empty-shard-matrix assertions (`:1260,1264,1268,1276` → `:4649-4651`), the new direct `ShardMatrixOutputServiceTests` test, and the existing `TestAcceptanceTests` sharding round-trip.
 
 ---
 
@@ -196,7 +209,7 @@ This is a protocol extension with a concrete body, not a new `@Mockable` require
 ### Unit Tests:
 
 - Existing `TestServiceTests`, `XcodeBuildTestCommandServiceTests`, `XcodeBuildBuildCommandServiceTests`, `XcodeBuildArgumentParserTests`, `ShardPlanServiceTests` suites must pass unmodified — none of these three phases changes observable behavior, only where code lives.
-- New: one direct test for `ShardMatrixOutputServicing.outputEmpty()` against the concrete service (Phase 3).
+- New: three direct cases for the shared `passedValue(for:arguments:)` in `TuistSupportTests` (Phase 2), and one direct test for `ShardMatrixOutputServicing.outputEmpty()` against the concrete service (Phase 3).
 
 ### Integration Tests:
 
@@ -206,7 +219,7 @@ This is a protocol extension with a concrete body, not a new `@Mockable` require
 
 1. After Phase 1: run `tuist test` locally, confirm no crash/regression.
 2. After Phase 2: run `tuist test` and `tuist xcodebuild test`/`build` with explicit passthrough flags, confirm argument parsing is unaffected.
-3. After Phase 3: run `tuist test --shard-total 2`, confirm sharding still completes and produces the expected matrix, including on a scheme with no tests to run if one is available in the sample project.
+3. After Phase 3: no manual step — the changed path is unreachable without a purpose-built no-test-targets fixture and `--build-only`; automated coverage (four existing `TestServiceTests` assertions, the new `ShardMatrixOutputServiceTests` test, and `TestAcceptanceTests`) stands in for it.
 
 ## Performance Considerations
 
@@ -245,7 +258,7 @@ Not applicable — no data model, storage, or API-contract changes.
 
 - [ ] 1.5 `tuist test` runs correctly locally, no regression
 
-### Phase 2: Deduplicate passedValue into a shared TuistSupport utility
+### Phase 2: Deduplicate `passedValue` into a shared TuistSupport utility
 
 #### Automated
 
@@ -253,12 +266,13 @@ Not applicable — no data model, storage, or API-contract changes.
 - [ ] 2.2 Lint passes
 - [ ] 2.3 Targeted unit tests pass (XcodeBuildTestCommandServiceTests, XcodeBuildBuildCommandServiceTests, XcodeBuildArgumentParserTests)
 - [ ] 2.4 Exactly one `passedValue` implementation remains, in TuistSupport
+- [ ] 2.6 New `XcodeBuildArgumentsTests` covers value-present, option-absent, and option-trailing cases
 
 #### Manual
 
 - [ ] 2.5 `tuist test` and `tuist xcodebuild test`/`build` pick up passthrough arguments identically to before
 
-### Phase 3: Close the OpenAPI seam in outputEmptyShardMatrixIfNeeded
+### Phase 3: Close the OpenAPI seam in `outputEmptyShardMatrixIfNeeded`
 
 #### Automated
 
@@ -266,7 +280,3 @@ Not applicable — no data model, storage, or API-contract changes.
 - [ ] 3.2 Lint passes
 - [ ] 3.3 Targeted unit tests pass (TestServiceTests, ShardMatrixOutputServiceTests, ShardPlanServiceTests) including new direct test
 - [ ] 3.4 Zero `Components.Schemas.`/`Operations.` occurrences left in TestService.swift
-
-#### Manual
-
-- [ ] 3.5 `tuist test --shard-total 2` completes and produces correct shard matrix output, including empty-matrix path if reachable

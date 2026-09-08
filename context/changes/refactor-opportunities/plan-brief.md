@@ -9,7 +9,7 @@
 
 ## Starting Point
 
-`TestService.swift:2239-2309` holds 5 methods with zero callers anywhere in the repo (an incomplete cleanup from a July 2026 commit that removed their only caller chain but not the leaves). `passedValue(for:arguments:)` is duplicated byte-for-byte in `TestService.swift` (unused), `XcodeBuildTestCommandService.swift`, `XcodeBuildBuildCommandService.swift` (all `TuistKit`), and `XcodeBuildArgumentParser.swift` (`TuistAutomation`) — the last copy independently reinvented 13 months after the others despite the file already importing the module holding a working copy. `TestService.swift:1479` hand-builds a generated `Components.Schemas.ShardPlan` value, the file's only direct touch of a generated type; this has needed 4 separate patches over 5 months as the server schema evolved.
+`TestService.swift:2239-2309` holds 5 methods with zero callers anywhere in the repo (an incomplete cleanup from a July 2026 commit that removed their only caller chain but not the leaves). `passedValue(for:arguments:)` is duplicated byte-for-byte in `TestService.swift` (unused), `XcodeBuildTestCommandService.swift`, `XcodeBuildBuildCommandService.swift` (all `TuistKit`), and `XcodeBuildArgumentParser.swift` (`TuistAutomation`) — the last copy independently reinvented 13 months after the others despite the file already importing the module holding a working copy. `TestService.swift:1479` hand-builds a generated `Components.Schemas.ShardPlan` value, the file's only direct touch of a generated type — it has needed 4 separate patches over 5 months as the server schema evolved, in a file that otherwise has no business knowing the schema's shape. Moving that construction into the servicing layer does not make the literal cheaper to maintain; it puts it next to the only code that owns the type, and gets the orchestrator out of the generated-type business.
 
 ## Desired End State
 
@@ -24,7 +24,7 @@
 | Shared `passedValue` shape | Module-scope `public func` in `TuistSupport`, not a `[String]` extension | Zero call-site edits needed — all 3 call sites already `import TuistSupport` and resolve unqualified once the local shadow is deleted | Plan |
 | OpenAPI-seam fix shape | Protocol *extension* (`outputEmpty()`) on `ShardMatrixOutputServicing`, not a new `@Mockable` requirement | Extension methods aren't remocked by `@Mockable` — calling it on a test mock falls through to the real body, which calls the mock's `output(_:)`, so all 4 existing tests keep passing unmodified | Plan |
 | Rollout | One PR, 3 sequential phases | All 3 changes are independently zero-risk; one review round is enough | Plan |
-| Manual QA depth | Automated tests/CI + a local CLI smoke test per phase | Extra confidence at near-zero cost given how mechanical these changes are | Plan |
+| Manual QA depth | Automated tests/CI + a local CLI smoke test for phases 1-2; phase 3 automated-only | Cheap extra confidence where a smoke test can reach the code; phase 3's changed path needs a purpose-built no-test-targets fixture and `--build-only`, so automated coverage stands in | Plan |
 
 ## Scope
 
@@ -61,6 +61,6 @@ Three independent, sequential phases in one PR: (1) pure subtraction of dead cod
 
 ## Success Criteria (Summary)
 
-- `tuist test`, `tuist xcodebuild test`, and `tuist xcodebuild build` behave identically to before the change (verified by existing + one new automated test, plus a local smoke test per phase)
+- `tuist test`, `tuist xcodebuild test`, and `tuist xcodebuild build` behave identically to before the change (verified by existing + one new automated test, plus a local smoke test for phases 1-2)
 - `TestService.swift` no longer contains the dead cluster, its own `passedValue` copy, or any direct `Components.Schemas.*`/`Operations.*` reference
 - `passedValue` exists exactly once in the codebase, in `TuistSupport`
