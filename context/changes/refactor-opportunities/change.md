@@ -1,7 +1,7 @@
 ---
 change_id: refactor-opportunities
 title: Turn test-service tech debt findings into ranked refactor opportunities
-status: preparing
+status: planned
 created: 2026-09-08
 updated: 2026-09-08
 archived_at: null
