@@ -5,10 +5,12 @@ git_commit: 7d0e3f0341f3f93b78f1a06b66c82498bcf18f90
 branch: 10x-devs
 repository: tuist
 topic: "Refactor opportunities z analizy TestService (dług techniczny → priorytety)"
-tags: [research, codebase, cli, testservice, technical-debt, refactor-opportunities]
+tags: [research, codebase, cli, testservice, technical-debt, refactor-opportunities, verified]
 status: complete
 last_updated: 2026-09-08
 last_updated_by: Mikołaj Chmielewski
+last_updated_note: "Zweryfikowano twierdzenia strukturalne przez ast-grep 0.45.3 + grep — zob. 'Weryfikacja twierdzeń (ast-grep)'; 1 błędna liczba i 1 błędna ścieżka skorygowane w tekście"
+verified_commit: 32cf7eb687621db54c7f0224180e081e6217b260
 ---
 
 # Research: Refactor opportunities z analizy TestService
@@ -96,7 +98,7 @@ To jest ekstrakcja strukturalna, **nie** przeprojektowanie pojęć biznesowych �
 
 ### Obecny kształt (z dowodami)
 
-`TestService.swift:2239-2309` — `xcodebuildDestination` (2239-2265), `simulatorPlatform` (2267-2270), `xcodebuildPlatform` (2272-2287), `hasConcreteDevice` (2289-2292), `xcodebuildDestinationParameter` (2294-2309) — evidence, linie zgodne z pierwotnym raportem, brak dryfu. Grep repo-wide: `xcodebuildDestination`, `simulatorPlatform`, `hasConcreteDevice` mają **zero** wywołań gdziekolwiek (evidence). `xcodebuildPlatform` ma jedno wywołanie — z wnętrza martwego `simulatorPlatform` (evidence). `xcodebuildDestinationParameter` ma dwa wywołania — oba z wnętrza martwego klastra (evidence). Cały klaster jest tranzytywnie nieosiągalny z `run()`.
+`TestService.swift:2239-2309` — `xcodebuildDestination` (2239-2265), `simulatorPlatform` (2267-2270), `xcodebuildPlatform` (2272-2287), `hasConcreteDevice` (2289-2292), `xcodebuildDestinationParameter` (2294-2309) — evidence, linie zgodne z pierwotnym raportem, brak dryfu. Grep repo-wide: `xcodebuildDestination`, `simulatorPlatform`, `hasConcreteDevice` mają **zero** wywołań gdziekolwiek (evidence). `xcodebuildPlatform` ma jedno wywołanie — z wnętrza martwego `simulatorPlatform` (evidence). `xcodebuildDestinationParameter` ma **3 (raport: 2)** wywołania — `:2273` (z wnętrza `xcodebuildPlatform`) oraz `:2290`/`:2291` (z wnętrza `hasConcreteDevice`), wszystkie z wnętrza martwego klastra (evidence, skorygowane w weryfikacji ast-grep — zob. sekcja "Weryfikacja twierdzeń"). Cały klaster jest tranzytywnie nieosiągalny z `run()`.
 
 `passedValue` — 4 identyczne kopie: `TestService.swift:2170`, `XcodeBuildBuildCommandService.swift:289`, `XcodeBuildTestCommandService.swift:351`, `cli/Sources/TuistAutomation/XcodeBuild/XcodeBuildArgumentParser.swift:48` (evidence, ciała identyczne). Czwarta kopia żyje w **innym module** (`TuistAutomation`, nie `TuistKit`) — evidence, `Package.swift:1318-1372` potwierdza `TuistKit` zależy od `TuistAutomation` (kierunek jednostronny).
 
@@ -212,11 +214,44 @@ Kryterium rankingu: dźwignia = koszt długu (jak bardzo obecny kształt boli/ko
 - `cli/Sources/TuistKit/Services/Sharding/ShardPlanService.swift:17-33`, `:72,87,99,192` — `ShardPlanServicing`, jedyny drugi konsument `ShardMatrixOutputServicing`
 - `cli/Sources/TuistKit/Services/TestQuarantineService.swift:7` — `TestQuarantineServicing`
 - `cli/Tests/TuistKitTests/Services/TestServiceTests.swift:1261,1265,1269,1277` — testy `outputEmptyShardMatrixIfNeeded`
-- `cli/Tests/TuistKitTests/Services/XcodeBuild/XcodeBuildTestCommandServiceTests.swift` (573 linii, 8 testów) — cienka osłona bliźniaka
+- `cli/Tests/TuistKitTests/Services/XcodeBuildTestCommandServiceTests.swift` (ścieżka skorygowana — raport: `.../Services/XcodeBuild/XcodeBuildTestCommandServiceTests.swift`, katalog testów nie powiela podkatalogu `XcodeBuild/` ze strony `Sources`; 573 linii, 8 testów — oba potwierdzone) — cienka osłona bliźniaka
 - `cli/Tests/TuistAutomationAcceptanceTests/TestAcceptanceTests.swift:337-452` — jedyne testy akceptacyjne shardingu (tylko strona `TestService`)
 - `Package.swift:1318-1372` (`TuistKit`), `:1472-1480` (`TuistAutomation`) — granice modułów, zależność `TuistKit → TuistAutomation → TuistSupport`
 - `cli/AGENTS.md` — sekcja "Legacy Modules", nazywa `TuistKit` jako obszar do unikania w nowym kodzie (dodane 2026-01-22, `4812545d10`)
 - `.github/workflows/cli.yml` — guardrails CI: `cli-lint`, `cli-unit-tests` (`tuist test TuistUnitTests`), `cli-acceptance-tests` (sharded), `cli-linux-*`
+
+## Weryfikacja twierdzeń (ast-grep)
+
+Wszystkie twierdzenia strukturalne stojące pod rankingiem (liczby metod/zależności, "nadpisuje X ale nie Y", liczność call-site'ów, pary lustrzanych typów) zweryfikowano niezależnie na commicie `32cf7eb687621db54c7f0224180e081e6217b260` (bieżący HEAD `10x-devs` w momencie weryfikacji — kod CLI nie zmienił się od czasu syntezy raportu, jedyny commit pomiędzy to zapis samego `research.md`/`change.md`). Metoda: `ast-grep 0.45.3 --lang swift` jako narzędzie pierwotne; każde zero-wynikowe zapytanie ast-grep potwierdzone niezależnie klasycznym `grep`/`wc -l`. Historyczne twierdzenia (daty commitów, autorstwo, treść commit message) i werdykty intencjonalności są **poza zakresem tej weryfikacji** — pozostają niezmienione, tak jak sekcja "Refactor opportunities".
+
+| # | Twierdzenie | Werdykt | Dowód (plik:linia) | Metoda (wzorzec/reguła) |
+|---|---|---|---|---|
+| 1 | `TestService` ma dokładnie 27 wstrzykiwanych zależności | **POTWIERDZONE** | `TestService.swift:108-134` (27 linii) | `ast-grep -p 'private let $NAME: $TYPE'` na pliku → 27 trafień; zgodne z liczeniem linii |
+| 2 | `XcodeBuildTestCommandService` ma dokładnie 16 wstrzykiwanych zależności | **POTWIERDZONE** | `XcodeBuildTestCommandService.swift:23-38` (16 linii) | jw. → 16 trafień |
+| 3 | 15 z 16 zależności bliźniaka pokrywa się typem z zależnościami `TestService` (94%) | **POTWIERDZONE** | Jedyny brak pokrycia: `UniqueIDGenerating` (`:27`) | Ręczny diff nazw typów z wyników zapytania #1 i #2 (15/16 = 93,75% ≈ 94%) |
+| 4 | Brak `extension TestService` gdziekolwiek w repo | **POTWIERDZONE** | — (zero trafień) | `ast-grep -p 'extension TestService { $$$ }'` na `cli/Sources`+`cli/Tests` → 0; potwierdzone `grep -rn "extension TestService"` → 0 |
+| 5 | `captureTestRunReport` — ciała identyczne w obu plikach | **POTWIERDZONE** | `TestService.swift:1975-1983` vs `XcodeBuildTestCommandService.swift:453-461` | Odczyt źródła obu zakresów, diff wizualny — identyczne co do znaku |
+| 6 | `passedValue` — identyczne ciała w 4 plikach, 2 modułach (`TuistKit`, `TuistAutomation`) | **POTWIERDZONE** | `TestService.swift:2170-2175`, `XcodeBuildTestCommandService.swift:351-358`, `XcodeBuildBuildCommandService.swift:289-297`, `XcodeBuildArgumentParser.swift:48-56` | `grep -n "func passedValue"` (4 pliki) + odczyt źródła każdego — ciała identyczne |
+| 7 | `uploadResultBundleIfNeeded` — ten sam trójstanowy `switch mode`, `TestService` ma dodatkowy guard `action != .build`, którego bliźniak nie ma | **POTWIERDZONE** | `TestService.swift:2015-2070` (guard `:2029`) vs `XcodeBuildTestCommandService.swift:395-448` (brak guardu, `:408` ma tylko `config.fullHandle != nil`) | Odczyt źródła obu metod pełnej długości |
+| 8 | Klaster 5 metod martwego kodu istnieje dokładnie na liniach 2239-2309 | **POTWIERDZONE** | `xcodebuildDestination` (`:2239`), `simulatorPlatform` (`:2267`), `xcodebuildPlatform` (`:2272`), `hasConcreteDevice` (`:2289`), `xcodebuildDestinationParameter` (`:2294`) | `grep -n "func <nazwa>("` na `TestService.swift` dla każdej z 5 nazw |
+| 9 | `xcodebuildDestination`, `simulatorPlatform`, `hasConcreteDevice` — zero wywołań w całym `cli/Sources`+`cli/Tests` | **POTWIERDZONE** | — (zero trafień poza deklaracją) | `grep -rn "\b<nazwa>("` na `cli/Sources`+`cli/Tests`, wykluczając linię `func <nazwa>(` |
+| 10 | `xcodebuildPlatform` — dokładnie 1 wywołanie, z wnętrza martwego `simulatorPlatform` | **POTWIERDZONE** | `TestService.swift:2268` | jw. |
+| 11 | `xcodebuildDestinationParameter` — dwa wywołania, oba z wnętrza martwego klastra | **OBALONE (liczba)** — poprawiono w tekście na **3 (raport: 2)** | `TestService.swift:2273` (z `xcodebuildPlatform`), `:2290` i `:2291` (oba z `hasConcreteDevice`) | jw. — 3 trafienia, nie 2. Nie zmienia werdyktu "martwy klaster" (wszystkie 3 wywołania nadal wewnątrz tego samego nieosiągalnego klastra) — **do decyzji na etapie planowania: nie wpływa na ranking, tylko na precyzję opisu** |
+| 12 | `TestService.swift` dotyka `Components.Schemas.*`/`Operations.*` dokładnie raz | **POTWIERDZONE** | `TestService.swift:1479` (`Components.Schemas.ShardPlan(...)`) | `ast-grep -p 'Components.Schemas.$TYPE'` → 1 trafienie; `ast-grep -p 'Operations.$TYPE'` → 0; potwierdzone `grep -n "Components\.Schemas\.\|Operations\."` → 1 |
+| 13 | `outputEmptyShardMatrixIfNeeded` obejmuje linie 1476-1488 | **POTWIERDZONE** | `TestService.swift:1476-1488` | Odczyt źródła |
+| 14 | `ShardMatrixOutputServicing` — protokół z jedną metodą przyjmującą surowy `Components.Schemas.ShardPlan` | **POTWIERDZONE** | `ShardMatrixOutputService.swift:11-13` | Odczyt źródła |
+| 15 | `ShardPlanServicing.plan(...)` zwraca `Components.Schemas.ShardPlan` | **POTWIERDZONE** | `ShardPlanService.swift:17-33` | Odczyt źródła |
+| 16 | Tylko 2 realne miejsca wywołania `shardMatrixOutputService.output(...)` w całym repo | **POTWIERDZONE** | `TestService.swift:1478`, `ShardPlanService.swift:192` | `grep -rn "shardMatrixOutputService.output("` na `cli/Sources`+`cli/Tests` → 2 trafienia produkcyjne (5 plików łącznie referencjonują identyfikator, ale tylko te 2 wywołują metodę) |
+| 17 | 4 dedykowane testy asertują `shard_count == 0 && shards.isEmpty` na wywołaniu `outputEmptyShardMatrixIfNeeded` | **DOPRECYZOWANE** | Deklaracje testów: `TestServiceTests.swift:1259,1263,1267,1275`; raport cytował `:1261,1265,1269,1277` — to zamykające klamry tych samych 4 testów, nie deklaracje (liczba testów i treść asercji poprawne, tylko anchor linii nieidealny); wspólna asercja: `:4649-4651` | `grep -n "func assertSkippedTestReport"` + odczyt źródła wokół `:4649-4651` |
+| 18 | `XcodeBuildTestCommandServiceTests.swift` — 573 linii, dokładnie 8 testów | **POTWIERDZONE (ścieżka w raporcie błędna — skorygowana)** | `cli/Tests/TuistKitTests/Services/XcodeBuildTestCommandServiceTests.swift` (raport podawał nieistniejący `.../Services/XcodeBuild/XcodeBuildTestCommandServiceTests.swift`) | `wc -l` → 573; `ast-grep -p '@Test($$$)' --json` → 8 trafień; potwierdzone `grep -c "@Test("` → 8 |
+| 19 | Sharding w pliku testów bliźniaka ma dokładnie 1 test, tylko przekazywanie argumentu | **POTWIERDZONE** | `XcodeBuildTestCommandServiceTests.swift:499` (`func passesShardArchivePathToShardService`) | `grep -n "func.*[Ss]hard"` → 1 trafienie |
+| 20 | `.remote`-mode `uploadResultBundle` w testach bliźniaka nigdy nie jest weryfikowany jako wywołany — jedyne wystąpienie to `.called(0)` w teście `mode: .off` | **POTWIERDZONE** | `XcodeBuildTestCommandServiceTests.swift:377-389` (`mode: .off`, `verify(uploadResultBundleService).uploadResultBundle(...)`) | Odczyt źródła wokół jedynego wywołania `.uploadResultBundle(` w pliku (`:384`) |
+| 21 | Brak wspólnego protokołu "pre-run server round-trip" (Planning/PreRun/Prefetch) i zero wzajemnych referencji kwarantanna↔sharding w kodzie | **POTWIERDZONE** | — (zero trafień) | `grep -rn "protocol.*Planning\|protocol.*PreRun\|protocol.*Prefetch" cli/Sources/TuistKit` → 0; `grep -n -i "shard" TestQuarantineService.swift` → 0; `grep -n -i "quarantine" ShardPlanService.swift ShardService.swift` → 0 |
+| 22 | `TuistKit` zależy bezpośrednio od `TuistAutomation` i `TuistSupport`; `TuistAutomation` zależy od `TuistSupport`, nie odwrotnie | **POTWIERDZONE** | `Package.swift:1318` (`TuistKit`), `:1340` (`TuistSupport`), `:1342` (`TuistAutomation`); `:1472` (`TuistAutomation`), `:1480` (`TuistSupport`) | Odczyt źródła `Package.swift` (nie plik kodu produkcyjnego per se, ast-grep pominięty na rzecz bezpośredniego odczytu + `grep -n '"TuistSupport"\|"TuistAutomation"'`) |
+| 23 | Konstruktory obu structów używają zwykłej iniekcji przez parametry domyślne, bez kontenera DI | **POTWIERDZONE** | `TestService.swift:149-177`, `XcodeBuildTestCommandService.swift:40-74` | Odczyt źródła obu inicjalizatorów pełnej długości |
+| 24 | `cli/AGENTS.md` nazywa `TuistKit` jako obszar legacy do unikania w nowym kodzie | **POTWIERDZONE** | `cli/AGENTS.md:16-17` | `grep -n -A3 "Legacy Modules"` |
+
+**Podsumowanie:** 23 z 24 zweryfikowanych twierdzeń strukturalnych potwierdzono dokładnie. Jedno (#11) było błędne co do liczby (2 zamiast 3 wywołań) — poprawione w tekście Kandydata B; nie zmienia werdyktu (metody nadal w 100% martwe/nieosiągalne z `run()`) ani pozycji Kandydata B w rankingu. Jedno (#17) doprecyzowano co do anchoru linii (cytowane były zamykające klamry, nie deklaracje testów) bez wpływu na treść twierdzenia. Jedno (#18) miało błędną ścieżkę pliku (dodatkowy, nieistniejący podkatalog `XcodeBuild/` w `cli/Tests/...`) przy poprawnych liczbach — ścieżka skorygowana w sekcji Code References. **Żadne ustalenie z tej weryfikacji nie podważa pozycji żadnego kandydata w rankingu ani werdyktów intencjonalności** — jedyna adnotacja "do decyzji na etapie planowania" dotyczy wyłącznie precyzji opisu w #11, nie samej klasyfikacji.
 
 ## Historical Context (from prior changes)
 
